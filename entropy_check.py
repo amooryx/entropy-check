@@ -1,66 +1,20 @@
-#!/usr/bin/env python3
-"""entropy-check - Measure file entropy to flag packed or encrypted artefacts
-
-Authorised security testing only. See README.
-"""
-from __future__ import annotations
-
-import argparse
-import sys
-
-TOOL = "entropy-check"
-DESCRIPTION = "Measure file entropy to flag packed or encrypted artefacts"
-
-
-def banner() -> None:
-    print(f"[ {TOOL} ] {DESCRIPTION}")
-
-
-def authorised(assume_yes: bool) -> bool:
-    """Refuse to run against a target without an explicit authorisation ack.
-
-    This is not legal cover; it is a deliberate speed bump. Offensive tooling
-    should never run by accident against the wrong target.
-    """
-    if assume_yes:
-        return True
-    ans = input("Do you have written authorisation to test this target? [y/N] ")
-    return ans.strip().lower() in ("y", "yes")
-
-
-def run(args: argparse.Namespace) -> int:
-    """Core routine.
-
-    This is a scaffold: it validates input, states scope, and defines the
-    workflow. Extend `run()` with the checks your engagement needs.
-    """
-    banner()
-    print(f"[*] target : {args.target}")
-    print(f"[*] output : {args.output or '(stdout)'}")
-    print("[*] scaffold ready - implement engagement-specific logic in run().")
+import math, rclib
+def run(ctx):
+    try: data = open(ctx.target, "rb").read()
+    except OSError as e: ctx.err(str(e)); return 1
+    if not data: ctx.warn("empty file"); return 0
+    freq = [0]*256
+    for b in data: freq[b]+=1
+    ent = -sum((c/len(data))*math.log2(c/len(data)) for c in freq if c)
+    ctx.info(f"size {len(data)} bytes")
+    ctx.info(f"Shannon entropy: {ent:.3f} / 8.0")
+    if ent > 7.2:
+        ctx.finding("High entropy — likely packed/encrypted/compressed", "medium",
+                    detail=f"{ent:.2f} bits/byte")
+    elif ent > 6.5:
+        ctx.finding("Elevated entropy — possibly obfuscated", "low", detail=f"{ent:.2f}")
+    else:
+        ctx.good(f"entropy normal for plain data ({ent:.2f})")
+    ctx.data["entropy"] = round(ent,4); ctx.data["size"] = len(data)
     return 0
-
-
-def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog=TOOL, description=DESCRIPTION)
-    p.add_argument("target", help="target host, domain, file, or scope identifier")
-    p.add_argument("-o", "--output", help="write results to this file")
-    p.add_argument("-v", "--verbose", action="store_true", help="verbose output")
-    p.add_argument("-y", "--yes", action="store_true", help="skip the authorisation prompt")
-    return p
-
-
-def main(argv: list[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if not authorised(args.yes):
-        print("[!] authorisation not confirmed; nothing was done.")
-        return 1
-    try:
-        return run(args)
-    except KeyboardInterrupt:
-        print("\n[!] interrupted.")
-        return 130
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+rclib.main("entropy-check", "File Shannon-entropy analysis (packing detection)", run, needs_target=True)
